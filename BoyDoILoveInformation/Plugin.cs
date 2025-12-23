@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
@@ -33,6 +34,10 @@ public class Plugin : BaseUnityPlugin
 
     public static AudioClip BDILIClick;
 
+    private string outdatedVersionText;
+    private bool   isDeprecatedVersion;
+    private float  lastNotification;
+
     private void Start()
     {
         new Harmony(Constants.PluginGuid).PatchAll();
@@ -49,8 +54,6 @@ public class Plugin : BaseUnityPlugin
 
     private void OnGameInitialized()
     {
-        FetchModsAndCheats();
-
         Stream bundleStream = Assembly.GetExecutingAssembly()
                                       .GetManifestResourceStream("BoyDoILoveInformation.Resources.bdilipublic");
 
@@ -58,14 +61,41 @@ public class Plugin : BaseUnityPlugin
         bundleStream?.Close();
 
         UberShader = Shader.Find("GorillaTag/UberShader");
+        
+        gameObject.AddComponent<Notifications>();
+        
+        using HttpClient client = new();
+        HttpResponseMessage response = client
+                                      .GetAsync(
+                                               "https://raw.githubusercontent.com/HanSolo1000Falcon/GorillaInfo/main/BDILIVersion")
+                                      .Result;
+
+        response.EnsureSuccessStatusCode();
+        using Stream       stream   = response.Content.ReadAsStreamAsync().Result;
+        using StreamReader reader   = new(stream);
+        string             contents = reader.ReadToEnd().Trim();
+
+        string[] parts = contents.Split(";");
+
+        Version mostUpToDateVersion = new(parts[0]);
+        Version currentVersion      = new(Constants.PluginVersion);
+
+        if (currentVersion < mostUpToDateVersion)
+        {
+            outdatedVersionText = parts[1];
+            isDeprecatedVersion = true;
+
+            return;
+        }
+        
+        FetchModsAndCheats();
 
         PluginAudioSource              = new GameObject("LocalAudioSource").AddComponent<AudioSource>();
         PluginAudioSource.spatialBlend = 0f;
         PluginAudioSource.playOnAwake  = false;
 
         BDILIClick = LoadWavFromResource("BoyDoILoveInformation.Resources.ButtonPressWood.wav");
-
-        gameObject.AddComponent<Notifications>();
+        
         gameObject.AddComponent<BDILIUtils>();
         gameObject.AddComponent<MenuHandler>();
     }
@@ -124,5 +154,14 @@ public class Plugin : BaseUnityPlugin
         audioClip.SetData(samples, 0);
 
         return audioClip;
+    }
+
+    private void Update()
+    {
+        if (!isDeprecatedVersion || Time.time - lastNotification < 10f)
+            return;
+        
+        lastNotification = Time.time;
+        Notifications.SendNotification(outdatedVersionText);
     }
 }
